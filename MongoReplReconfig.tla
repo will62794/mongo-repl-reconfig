@@ -68,11 +68,7 @@ VARIABLE config
 \* The config version of a node's current config.
 VARIABLE configVersion
 
-\* The term in which the current config on a node was written in i.e. the term of the primary
-\* that moved to that config.
-VARIABLE configTerm
-
-vars == <<allLogs, serverVars, elections, log, immediatelyCommitted, config, configVersion, configTerm>>
+vars == <<allLogs, serverVars, elections, log, immediatelyCommitted, config, configVersion>>
 
 -------------------------------------------------------------------------------------------
 
@@ -163,7 +159,7 @@ RollbackEntries(i, j) ==
     \* Step down remote node if it's term is smaller than yours.                                      
     /\ state' = [state EXCEPT ![i] = IF currentTerm[i] < currentTerm[j] THEN Secondary ELSE state[i],
                               ![j] = Secondary] 
-    /\ UNCHANGED <<votedFor, elections, config, configVersion, immediatelyCommitted, configTerm>>
+    /\ UNCHANGED <<votedFor, elections, config, configVersion, immediatelyCommitted>>
        
 (******************************************************************************)
 (* [ACTION]                                                                   *)
@@ -193,7 +189,7 @@ GetEntries(i, j) ==
                                           ![j] = Max({currentTerm[i], currentTerm[j]})]
     \* Step down remote node if it's term is smaller than yours.                                      
     /\ state' = [state EXCEPT ![j] = IF currentTerm[j] < currentTerm[i] THEN Secondary ELSE state[j]]          
-    /\ UNCHANGED <<votedFor, elections, config, configVersion, immediatelyCommitted, configTerm>>   
+    /\ UNCHANGED <<votedFor, elections, config, configVersion, immediatelyCommitted>>   
     
 (******************************************************************************)
 (* [ACTION]                                                                   *)
@@ -219,28 +215,7 @@ BecomeLeader(i) ==
                             elog      |-> log[i],
                             evotes    |-> voteQuorum] IN
            elections'  = elections \cup {election}        
-        /\ UNCHANGED <<log, config, configVersion, immediatelyCommitted, configTerm>>         
-
-
-
-\* A quorum of nodes have received this config or a newer one.
-ConfigQuorumCheck(i) == 
-    \E quorum \in Quorums(config[i]) : \A s \in quorum : configVersion[s] >= configVersion[i]
-
-\* Was an op was committed in the config of node i.
-OpCommittedInConfig(i) ==
-    /\ \E e \in immediatelyCommitted : e[3] = configVersion[i]
-
-\* Did a node talked to a quorum as primary.
-TermQuorumCheck(i) ==
-    /\ \A q \in Quorums(config[i]) :
-       \A s \in q : currentTerm[i] >= currentTerm[s]
-
-\* Is the config on node i currently "safe".
-ConfigIsSafe(i) ==
-    /\ TermQuorumCheck(i)
-    /\ ConfigQuorumCheck(i)
-    /\ OpCommittedInConfig(i)
+        /\ UNCHANGED <<log, config, configVersion, immediatelyCommitted>>         
 
 \*
 \* A reconfig occurs on node i. The node must currently be a leader.
@@ -250,16 +225,12 @@ Reconfig(i) ==
     \* Make sure to include this node in the new config, though.
     \E newConfig \in SUBSET Server : 
         /\ state[i] = Primary
-        \* Only allow a new config to be installed if the current config is "safe".
-        /\ ConfigIsSafe(i)
         \* Add or remove a single node. (OPTIONALLY ENABLE)
         /\ \/ \E n \in newConfig : newConfig \ {n} = config[i]  \* add 1.
            \/ \E n \in config[i] : config[i] \ {n} = newConfig  \* remove 1.
         /\ i \in newConfig
         \* The config on this node takes effect immediately
         /\ config' = [config EXCEPT ![i] = newConfig]
-        \* Record the term of the primary that wrote this config.
-        /\ configTerm' = [configTerm EXCEPT ![i] = currentTerm[i]]
         /\ \* Pick a config version higher than all existing config versions.
             LET newConfigVersion == Max(Range(configVersion)) + 1 IN
             configVersion' = [configVersion EXCEPT ![i] = newConfigVersion]
@@ -269,8 +240,6 @@ Reconfig(i) ==
 \* node j to accept the config of node i.
 IsNewerConfig(i, j) == 
     /\ configVersion[i] > configVersion[j]
-    \* /\ currentTerm[i] >= currentTerm[j] \* shouldn't be necessary anymore with 'configTerm'.
-    /\ configTerm[i] >= currentTerm[j]
 
 \* Node i sends its current config to node j. It is only accepted if the config version is newer.
 SendConfig(i, j) == 
@@ -278,7 +247,6 @@ SendConfig(i, j) ==
     \* action to propagate terms, though, even if the config is not updated.
     /\ config' = [config EXCEPT ![j] = IF IsNewerConfig(i, j) THEN config[i] ELSE config[j]]
     /\ configVersion' = [configVersion EXCEPT ![j] = IF IsNewerConfig(i, j) THEN configVersion[i] ELSE configVersion[j]]
-    /\ configTerm' = [configTerm EXCEPT ![j] = configTerm[i]]
     \* Update terms of sender and receiver i.e. to simulate an RPC request and response (heartbeat).
     /\ currentTerm' = [currentTerm EXCEPT ![i] = Max({currentTerm[i], currentTerm[j]}),
                                           ![j] = Max({currentTerm[i], currentTerm[j]})]
@@ -303,7 +271,7 @@ CommitEntry(i) ==
             /\ log[s][ind] = log[i][ind]        \* they have the entry.
             /\ currentTerm[s] = currentTerm[i]  \* they are in the same term.
         /\ immediatelyCommitted' = immediatelyCommitted \cup {<<ind, currentTerm[i], configVersion[i]>>}
-        /\ UNCHANGED <<serverVars, elections, log, config, configVersion, configTerm>>              
+        /\ UNCHANGED <<serverVars, elections, log, config, configVersion>>              
         
 (******************************************************************************)
 (* [ACTION]                                                                   *)
@@ -316,7 +284,7 @@ ClientRequest(i) ==
     /\ LET entry == [term  |-> currentTerm[i]]
        newLog == Append(log[i], entry) IN
        /\ log' = [log EXCEPT ![i] = newLog]
-    /\ UNCHANGED <<serverVars, elections, config, configVersion, immediatelyCommitted, configTerm>>
+    /\ UNCHANGED <<serverVars, elections, config, configVersion, immediatelyCommitted>>
 
 -------------------------------------------------------------------------------------------
 
@@ -498,7 +466,6 @@ Init ==
     \* all nodes.
     /\ config =         [i \in Server |-> Server]
     /\ configVersion =  [i \in Server |-> 0]
-    /\ configTerm    =  [i \in Server |-> 0]
     \* History variables
     /\ elections = {}
     /\ allLogs   = {log[i] : i \in Server}
