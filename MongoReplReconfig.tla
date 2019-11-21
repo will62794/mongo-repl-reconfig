@@ -410,13 +410,20 @@ ActiveConfigsOverlap == \A x,y \in InstalledConfigs : ActiveConfig(x) /\ ActiveC
 (**************************************************************************************************)
 (* Liveness properties                                                                            *)
 (**************************************************************************************************)
-ConfigEventuallyPropagates ==
-    \A i, j \in Server:
-        i \in config[j] ~> \/ i \notin config[j]
-                           \/ state[i] = Down
-                           \/ configVersion[i] = configVersion[j]
+AnyNodeCanRollBack == \E s \in Server :
+    \E syncSource \in Server: ENABLED RollbackEntries(syncSource, s)
 
-ElectableNodeEventuallyExists == <>(\E s \in Server : state[s] = Primary)
+ConfigEventuallyPropagates == <>(
+    \/ AnyNodeCanRollBack
+    \/ \A i, j \in Server:
+          \/ i \notin config[j]
+          \/ state[i] = Down
+          \/ configVersion[i] = configVersion[j]
+)
+
+ElectableNodeEventuallyExists == <>(
+    \/ AnyNodeCanRollBack
+    \/ \E s \in Server : state[s] = Primary)
 
 (**************************************************************************************************)
 (* Spec definition                                                                                *)
