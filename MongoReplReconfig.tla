@@ -413,7 +413,7 @@ AtMostOneActiveConfig == Cardinality(ActiveConfigs) <= 1
 AnyNodeCanRollBack == \E s \in Server :
     \E syncSource \in Server: ENABLED RollbackEntries(syncSource, s)
 
-ConfigEventuallyPropagates == <>(
+ConfigEventuallyPropagates == []<>(
     \/ AnyNodeCanRollBack
     \/ \A i, j \in Server:
           \/ i \notin config[j]
@@ -421,7 +421,7 @@ ConfigEventuallyPropagates == <>(
           \/ configVersion[i] = configVersion[j]
 )
 
-ElectableNodeEventuallyExists == <>(
+ElectableNodeEventuallyExists == []<>(
     \/ AnyNodeCanRollBack
     \/ \E s \in Server : state[s] = Primary)
 
