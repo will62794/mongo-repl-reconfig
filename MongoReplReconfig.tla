@@ -163,18 +163,16 @@ GetEntries(i, j) ==
        \* Ensure that the entry at the last index of node i's log must match the entry at
        \* the same index in node j's log. If the log of node i is empty, then the check
        \* trivially passes. This is the essential 'log consistency check'.
-    /\ LET logOk == IF Empty(log[i])
-                        THEN TRUE
-                        ELSE log[j][Len(log[i])] = log[i][Len(log[i])] IN
+    /\ LET logOk == IF Empty(log[i]) THEN TRUE
+                    ELSE log[j][Len(log[i])] = log[i][Len(log[i])] IN
        /\ logOk \* log consistency check
-       \* If the log of node i is empty, then take the first entry from node j's log.
-       \* Otherwise take the entry following the last index of node i.
-       /\ LET newEntryIndex == IF Empty(log[i]) THEN 1 ELSE Len(log[i]) + 1
+       /\ LET newEntryIndex == Len(log[i]) + 1
               newEntry      == log[j][newEntryIndex]
               newLog        == Append(log[i], newEntry) IN
               /\ log' = [log EXCEPT ![i] = newLog]
     /\ UpdateTerms(i, j)
     /\ UNCHANGED <<immediatelyCommitted, configVars>>
+
 (******************************************************************************)
 (* [ACTION]                                                                   *)
 (*                                                                            *)
@@ -182,14 +180,13 @@ GetEntries(i, j) ==
 (* its own config's notion of a quorum.                                       *)
 (******************************************************************************)
 CommitEntry(i) ==
-    LET ind == Len(log[i]) IN
-    \E quorum \in Quorums(config[i]) :
-        \* Must have some entries to commit.
-        /\ ind > 0
-        \* This node is leader.
-        /\ state[i] = Primary
-        \* The entry was written by this leader.
-        /\ log[i][ind].term = currentTerm[i]
+    \* Must have some entries to commit.
+    /\ ~Empty(log[i])
+    \* This node is leader.
+    /\ state[i] = Primary
+    \* The entry was written by this leader.
+    /\ LastTerm(log[i]) = currentTerm[i]
+    /\ LET ind == Len(log[i]) IN \E quorum \in Quorums(config[i]) :
         \* all nodes have this log entry and are in the term of the leader.
         /\ \A s \in quorum :
             /\ Len(log[s]) >= ind
@@ -205,17 +202,17 @@ CommitEntry(i) ==
 (* Node 'i' automatically becomes a leader, if eligible.                      *)
 (******************************************************************************)
 
-\* Can node 'i' currently cast a vote for node 'j' in term 'term'.
-CanVoteFor(i, j, term) ==
+\* Can node 'voter' currently cast a vote for node 'candidate' in term 'term'.
+CanVoteFor(voter, candidate, term) ==
     LET logOk ==
-        \/ LastTerm(log[j]) > LastTerm(log[i])
-        \/ /\ LastTerm(log[j]) = LastTerm(log[i])
-           /\ Len(log[j]) >= Len(log[i]) IN
+        \/ LastTerm(log[candidate]) > LastTerm(log[voter])
+        \/ /\ LastTerm(log[candidate]) = LastTerm(log[voter])
+           /\ Len(log[candidate]) >= Len(log[voter]) IN
     \* Nodes can only vote once per term, and they will never
     \* vote for someone with a lesser term than their own.
-    /\ currentTerm[i] < term
+    /\ currentTerm[voter] < term
     \* Only vote for someone if their config version is >= your own.
-    /\ IsNewerConfig(j, i)
+    /\ IsNewerConfig(candidate, voter)
     /\ logOk
 
 BecomeLeader(i) ==
@@ -256,12 +253,12 @@ ConfigIsSafe(i) ==
 \* [ACTION]
 \* A reconfig occurs on node i. The node must currently be a leader.
 Reconfig(i) ==
+    /\ state[i] = Primary
+    \* Only allow a new config to be installed if the current config is "safe".
+    /\ ConfigIsSafe(i)
     \* Pick some arbitrary subset of servers to reconfig to.
     \* Make sure to include this node in the new config, though.
-    \E newConfig \in SUBSET Server :
-        /\ state[i] = Primary
-        \* Only allow a new config to be installed if the current config is "safe".
-        /\ ConfigIsSafe(i)
+    /\ \E newConfig \in SUBSET Server :
         \* Add or remove a single node. (OPTIONALLY ENABLE)
         /\ \/ \E n \in newConfig : newConfig \ {n} = config[i]  \* add 1.
            \/ \E n \in config[i] : config[i] \ {n} = newConfig  \* remove 1.
@@ -280,14 +277,14 @@ Reconfig(i) ==
 
 \* [ACTION]
 \* Node i sends its current config to node j. It is only accepted if the config is newer.
-SendConfig(i, j) ==
+SendConfig(sender, receiver) ==
     \* Only update config if the received config is newer and its term is >= than your current term.
-    /\ IsNewerConfig(i, j)
-    /\ configTerm[i] >= currentTerm[j]
-    /\ config' = [config EXCEPT ![j] = config[i]]
-    /\ configVersion' = [configVersion EXCEPT ![j] = configVersion[i]]
-    /\ configTerm' = [configTerm EXCEPT ![j] = configTerm[i]]
-    /\ UpdateTerms(i, j)
+    /\ IsNewerConfig(sender, receiver)
+    /\ configTerm[sender] >= currentTerm[receiver]
+    /\ config' = [config EXCEPT ![receiver] = config[sender]]
+    /\ configVersion' = [configVersion EXCEPT ![receiver] = configVersion[sender]]
+    /\ configTerm' = [configTerm EXCEPT ![receiver] = configTerm[sender]]
+    /\ UpdateTerms(sender, receiver)
     /\ UNCHANGED <<log, immediatelyCommitted>>
 
 \* [ACTION]
@@ -309,9 +306,7 @@ ShutDown(i) ==
 (******************************************************************************)
 ClientRequest(i) ==
     /\ state[i] = Primary
-    /\ LET entry == [term  |-> currentTerm[i]]
-       newLog == Append(log[i], entry) IN
-       /\ log' = [log EXCEPT ![i] = newLog]
+    /\ log' = [log EXCEPT ![i] = Append(@, [term  |-> currentTerm[i]])]
     /\ UNCHANGED <<serverVars, immediatelyCommitted, configVars>>
 
 -------------------------------------------------------------------------------------------
