@@ -211,7 +211,8 @@ CanVoteFor(voter, candidate, term) ==
     \* Nodes can only vote once per term, and they will never
     \* vote for someone with a lesser term than their own.
     /\ currentTerm[voter] < term
-    \* Only vote for someone if their config version is >= your own.
+    \* Only vote for someone if their config version is >= your own,
+    \* such that nodes in stale configs won't interfere with the latest config.
     /\ IsNewerConfig(candidate, voter)
     /\ logOk
 
@@ -234,6 +235,8 @@ BecomeLeader(i) ==
 
 
 \* A quorum of nodes have received this config.
+\* With bumping the config term on step-up, this effectively gathers the votes from
+\* nodes, so that nodes in earlier configs cannot win elections.
 ConfigQuorumCheck(self, s) == /\ configVersion[self] = configVersion[s]
                               /\ configTerm[self] = configTerm[s]
 
@@ -269,18 +272,20 @@ Reconfig(i) ==
         /\ config' = [config EXCEPT ![i] = newConfig]
         \* Record the term of the primary that wrote this config.
         /\ configTerm' = [configTerm EXCEPT ![i] = currentTerm[i]]
-        /\ \* Increment the local config version. Here we do not assume that config versions
-           \* are globally unique.
-            LET newConfigVersion == configVersion[i] + 1 IN
-            configVersion' = [configVersion EXCEPT ![i] = newConfigVersion]
+        \* Increment the local config version. Here we do not assume that config versions
+        \* are globally unique.
+        /\ configVersion' = [configVersion EXCEPT ![i] = @ + 1]
         /\ UNCHANGED <<serverVars, log, immediatelyCommitted>>
 
 \* [ACTION]
 \* Node i sends its current config to node j. It is only accepted if the config is newer.
 SendConfig(sender, receiver) ==
     \* Only update config if the received config is newer and its term is >= than your current term.
-    /\ IsNewerConfig(sender, receiver)
-    /\ configTerm[sender] >= currentTerm[receiver]
+    /\ \/ configTerm[sender] > configTerm[receiver]
+       \/ /\ configTerm[sender] = configTerm[receiver]
+          /\ configVersion[sender] > configVersion[receiver]
+    \* /\ IF configTerm[sender] >= currentTerm[receiver] THEN TRUE
+    \* ELSE PrintT("cv: " \o ToString(configVersion) \o " ct: " \o ToString(configTerm) \o " t: " \o ToString(currentTerm))
     /\ config' = [config EXCEPT ![receiver] = config[sender]]
     /\ configVersion' = [configVersion EXCEPT ![receiver] = configVersion[sender]]
     /\ configTerm' = [configTerm EXCEPT ![receiver] = configTerm[sender]]
